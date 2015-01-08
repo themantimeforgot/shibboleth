@@ -2,14 +2,15 @@
 /*
  Plugin Name: Shibboleth
  Plugin URI: http://wordpress.org/extend/plugins/shibboleth
- Description: Easily externalize user authentication to a <a href="http://shibboleth.internet2.edu">Shibboleth</a> Service Provider
+ Description: Easily externalize user authentication to a <a href="http://shibboleth.internet2.edu">Shibboleth</a> Service Provider. Contains updates for multsite configuration plus network/site activations.
  Author: Will Norris, mitcho (Michael 芳貴 Erlewine)
- Version: 1.6
+ Contributor: Jonathan Tascoe
+ Version: 1.6.1
  License: Apache 2 (http://www.apache.org/licenses/LICENSE-2.0.html)
  */
 
 define ( 'SHIBBOLETH_PLUGIN_REVISION', preg_replace( '/\$Rev: (.+) \$/', '\\1',
-	'$Rev$') ); // this needs to be on a separate line so that svn:keywords can work its magic
+	'$Rev: 889085 $') ); // this needs to be on a separate line so that svn:keywords can work its magic
 
 
 // run activation function if new revision of plugin
@@ -44,7 +45,7 @@ add_action('init', 'shibboleth_auto_login');
  * WordPress's .htaccess file.
  */
 function shibboleth_activate_plugin() {
-	if ( function_exists('switch_to_blog') ) switch_to_blog($GLOBALS['current_site']->blog_id);
+    if ( function_exists('switch_to_blog') ) switch_to_blog( shibboleth_select_current_site() );
 
 	shibboleth_add_option('shibboleth_login_url', get_option('home') . '/Shibboleth.sso/Login');
 	shibboleth_add_option('shibboleth_default_login', false);
@@ -214,7 +215,7 @@ function shibboleth_login_url($login_url) {
 	if ( shibboleth_get_option('shibboleth_default_login') ) {
 		$login_url = add_query_arg('action', 'shibboleth', $login_url);
 	}
-
+    
 	return $login_url;
 }
 add_filter('login_url', 'shibboleth_login_url');
@@ -246,8 +247,10 @@ function shibboleth_session_initiator_url($redirect = null) {
 
 	// first build the target URL.  This is the WordPress URL the user will be returned to after Shibboleth 
 	// is done, and will handle actually logging the user into WordPress using the data provdied by Shibboleth 
-	if ( function_exists('switch_to_blog') ) switch_to_blog($GLOBALS['current_site']->blog_id);
+	if ( function_exists('switch_to_blog') ) switch_to_blog( shibboleth_select_current_site() );
+
 	$target = site_url('wp-login.php');
+    
 	if ( function_exists('restore_current_blog') ) restore_current_blog();
 
 	$target = add_query_arg('action', 'shibboleth', $target);
@@ -290,7 +293,7 @@ function shibboleth_authenticate_user() {
 	}
 
 	$username = $_SERVER[$shib_headers['username']['name']];
-	$user = new WP_User($username);
+	$user = new WP_User(0, $username);
 
 	if ( $user->ID ) {
 		if ( !get_usermeta($user->ID, 'shibboleth_account') ) {
@@ -458,8 +461,9 @@ add_filter( 'shibboleth_user_nicename', 'sanitize_user' );
  * deployers can style this however they choose.
  */
 function shibboleth_login_form() {
-	$login_url = add_query_arg('action', 'shibboleth');
-	$login_url = remove_query_arg('reauth', $login_url);
+    $params = array( 'action' => 'shibboleth' );
+
+	$login_url = add_query_arg( $params );
 	echo '<p id="shibboleth_login"><a href="' . $login_url . '">' . __('Login with Shibboleth', 'shibboleth') . '</a></p>';
 }
 add_action('login_form', 'shibboleth_login_form');
@@ -471,7 +475,7 @@ add_action('login_form', 'shibboleth_login_form');
 function shibboleth_insert_htaccess() {
 	if ( got_mod_rewrite() ) {
 		$htaccess = get_home_path() . '.htaccess';
-		$rules = array('AuthType shibboleth', 'Require shibboleth');
+		$rules = array('AuthType Shibboleth', 'Require Shibboleth');
 		insert_with_markers($htaccess, 'Shibboleth', $rules);
 	}
 }
@@ -490,26 +494,39 @@ function shibboleth_remove_htaccess() {
 
 /* Custom option functions to correctly use WPMU *_site_option functions when available. */
 function shibboleth_get_option($key, $default = false ) {
-	return function_exists('get_site_option') ? get_site_option($key, $default) : get_option($key, $default);
+	return shibboleth_is_network_active() ? get_site_option($key, $default) : get_option($key, $default);
 }
 function shibboleth_add_option($key, $value, $autoload = 'yes') {
-	if (function_exists('add_site_option')) {
-		return add_site_option($key, $value);
-	} else {
-		return add_option($key, $value, '', $autoload);
-	}
+	return shibboleth_is_network_active() ? add_site_option($key, $value) : add_option($key, $value, '', $autoload);
 }
 function shibboleth_update_option($key, $value) {
-	return function_exists('update_site_option') ? update_site_option($key, $value) : update_option($key, $value);
+	return shibboleth_is_network_active() ? update_site_option($key, $value) : update_option($key, $value);
 }
 function shibboleth_delete_option($key) {
-	return function_exists('delete_site_option') ? delete_site_option($key) : delete_option($key);
+	return shibboleth_is_network_active() ? delete_site_option($key) : delete_option($key);
+}
+
+
+/**
+ * Selects the current blog or website that shibboleth is working with.
+ * 
+ * @retuns integer
+ * @since 1.6.1
+ */
+function shibboleth_select_current_site() {
+    if ( !empty( $GLOBALS['current_blog']->blog_id ) && $GLOBALS['current_blog']->blog_id > 1 ) {
+        return $GLOBALS['current_blog']->blog_id;
+    } else {
+        return $GLOBALS['current_site']->blog_id;
+    }
 }
 
 /**
- * Load localization files.
+ * Checks whether the plugin is network activated or not.
+ * 
+ * @returns boolean
+ * @since 1.6.1
  */
-function shibboleth_load_textdomain() {
-	load_plugin_textdomain('shibboleth', false, dirname( plugin_basename( __FILE__ ) ) . '/localization/');
+function shibboleth_is_network_active() {
+    if(function_exists('is_plugin_active_for_network')) return is_plugin_active_for_network( 'shibboleth/shibboleth.php' );
 }
-add_action('plugins_loaded', 'shibboleth_load_textdomain');

@@ -1,10 +1,13 @@
 <?php
 // functions for managing Shibboleth options through the WordPress administration panel
 
-if ( is_multisite() ) {
-	add_action('network_admin_menu', 'shibboleth_network_admin_panels');
-} else {
-	add_action('admin_menu', 'shibboleth_admin_panels');
+if ( current_user_can('manage_options') ) {
+    // Is the plguin network activated?
+    if ( shibboleth_is_network_active() ) {
+        add_action('network_admin_menu', 'shibboleth_admin_panels');
+    } else {
+        add_action('admin_menu', 'shibboleth_admin_panels');
+    }
 }
 
 /**
@@ -13,25 +16,28 @@ if ( is_multisite() ) {
  * @action: admin_menu
  **/
 function shibboleth_admin_panels() {
-	$hookname = add_options_page(__('Shibboleth options', 'shibboleth'), 
-		__('Shibboleth', 'shibboleth'), 'manage_options', 'shibboleth-options', 'shibboleth_options_page' );
-	add_contextual_help($hookname, shibboleth_help_text());
+    // global options page
+	if ( function_exists( 'add_submenu_page' ) ) {
+        // Choose the page based on network activation.
+        $page = shibboleth_is_network_active() ? 'settings.php' : 'options-general.php';
+		$hookname = add_submenu_page($page, __('Shibboleth Options', 'shibboleth'),
+			__('Shibboleth', 'shibboleth'), 'manage_network_options', 'shibboleth-options', 'shibboleth_options_page' );
+	} else {
+		$hookname = add_options_page(__('Shibboleth Options', 'shibboleth'),
+			__('Shibboleth', 'shibboleth'), 'activate_plugins', 'shibboleth-options', 'shibboleth_options_page' );
+    }
+
+    $screen = WP_Screen::get($hookname);
+    $screen->add_help_tab(array(
+        'title' => 'Shibboleth Help',
+        'id' => 'shibboleth-help',
+        'content' => 'shibboleth_help_text',
+    ));
 }
 
-/**
- * Setup multisite admin menus for Shibboleth options.
- *
- * @action: network_admin_menu
- **/
-function shibboleth_network_admin_panels() {
-	$hookname = add_submenu_page('settings.php', __('Shibboleth options', 'shibboleth'), 
-		__('Shibboleth', 'shibboleth'), 'manage_network_options', 'shibboleth-options', 'shibboleth_options_page' );
-	add_contextual_help($hookname, shibboleth_help_text());
-}
-
 
 /**
- * Add Shibboleth links to the "help" pull down panel.
+ * Add Shibboleth links to the "help" pull down pane
  */
 function shibboleth_help_text() {
 	$text = '
@@ -310,7 +316,7 @@ if ( apply_filters('shibboleth_role_mapping_override',false) === false ):
 					foreach ($wp_roles->role_names as $key => $name) {
 						echo'
 						<tr valign="top">
-							<th scope="row">' . _c($name) . '</th>
+							<th scope="row">' . __($name) . '</th>
 							<td><input type="text" id="role_'.$key.'_header" name="shibboleth_roles['.$key.'][header]" value="' . @$shib_roles[$key]['header'] . '" style="width: 100%" /></td>
 							<td><input type="text" id="role_'.$key.'_value" name="shibboleth_roles['.$key.'][value]" value="' . @$shib_roles[$key]['value'] . '" style="width: 100%" /></td>
 						</tr>';
@@ -330,7 +336,7 @@ if ( apply_filters('shibboleth_role_mapping_override',false) === false ):
 <?php
 			foreach ($wp_roles->role_names as $key => $name) {
 				echo '
-						<option value="' . $key . '"' . ($shib_roles['default'] == $key ? ' selected="selected"' : '') . '>' . _c($name) . '</option>';
+						<option value="' . $key . '"' . ($shib_roles['default'] == $key ? ' selected="selected"' : '') . '>' . __($name) . '</option>';
 			}
 ?>
 						</select>
